@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Holiday Budget Dashboard</title>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/chart.umd.js"></script>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#161d2e; --panel2:#1d2740; --border:#2a3552;
+    --text:#eef1f8; --muted:#9aa5c0; --accent:#5b8cff; --accent2:#31d0aa;
+    --warn:#ffb648; --danger:#ff6767;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:radial-gradient(1200px 800px at 10% -10%, #1b2440 0%, var(--bg) 55%);
+    color:var(--text); min-height:100vh; padding:24px 20px 60px;
+  }
+  h1{font-size:1.6rem; margin:0 0 4px;}
+  .sub{color:var(--muted); margin:0 0 20px; font-size:0.95rem;}
+  .toolbar{
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:20px;
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:12px 16px;
+  }
+  .toolbar label{font-size:0.85rem; color:var(--muted);}
+  select, button, input[type=file]{
+    background:var(--panel2); color:var(--text); border:1px solid var(--border);
+    border-radius:8px; padding:7px 10px; font-size:0.85rem; cursor:pointer;
+  }
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600;}
+  #status{font-size:0.8rem; color:var(--muted); margin-left:auto;}
+  #dropzone{
+    border:1.5px dashed var(--border); border-radius:10px; padding:6px 12px;
+    font-size:0.8rem; color:var(--muted);
+  }
+  #dropzone.drag{border-color:var(--accent); color:var(--accent);}
+
+  .cards{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+    gap:14px; margin-bottom:20px;
+  }
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px 18px;
+  }
+  .card .label{font-size:0.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;}
+  .card .value{font-size:1.6rem; font-weight:700; margin-top:6px;}
+  .card .sub2{font-size:0.78rem; color:var(--muted); margin-top:4px;}
+  .card.total .value{color:var(--accent);}
+  .card.used .value{color:var(--accent2);}
+  .card.remaining .value{color:var(--warn);}
+  .card.pct .value{color:#c78bff;}
+  .progress-track{height:8px; border-radius:5px; background:var(--panel2); margin-top:10px; overflow:hidden;}
+  .progress-fill{height:100%; background:linear-gradient(90deg,var(--accent2),var(--accent)); border-radius:5px;}
+
+  .grid{
+    display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px; margin-bottom:20px;
+  }
+  @media (max-width:900px){ .grid{grid-template-columns:1fr;} }
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px 18px;
+  }
+  .panel h3{margin:0 0 12px; font-size:0.95rem; color:var(--text);}
+  .panel.wide{grid-column:1 / -1;}
+  canvas{max-height:340px;}
+
+  table{width:100%; border-collapse:collapse; font-size:0.83rem;}
+  thead th{
+    text-align:left; padding:8px 10px; color:var(--muted); font-weight:600;
+    border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel);
+    cursor:pointer; user-select:none;
+  }
+  tbody td{padding:7px 10px; border-bottom:1px solid #1f2942;}
+  tbody tr:hover{background:var(--panel2);}
+  .table-wrap{max-height:420px; overflow:auto; border-radius:8px;}
+  .tag{padding:2px 8px; border-radius:999px; font-size:0.72rem; background:var(--panel2); border:1px solid var(--border);}
+  .num{text-align:right; font-variant-numeric:tabular-nums;}
+  .filters{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;}
+  #loading{color:var(--muted); padding:40px; text-align:center;}
+  footer{color:var(--muted); font-size:0.75rem; text-align:center; margin-top:30px;}
+</style>
+</head>
+<body>
+
+<h1>🎄 Holiday Budget Dashboard</h1>
+<p class="sub">Forecasted holiday expenses — live from <code>data/Holiday.xlsx</code></p>
+
+<div class="toolbar">
+  <label for="locationFilter">Location</label>
+  <select id="locationFilter"><option value="">All</option></select>
+  <label for="categoryFilter">Category</label>
+  <select id="categoryFilter"><option value="">All</option></select>
+  <button class="primary" id="reloadBtn">↻ Reload spreadsheet</button>
+  <label id="dropzone" for="fileInput">Drop updated .xlsx here or click to upload</label>
+  <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none" />
+  <span id="status">Loading…</span>
+</div>
+
+<div id="loading">Loading spreadsheet data…</div>
+
+<div id="app" style="display:none">
+
+  <div class="cards">
+    <div class="card total">
+      <div class="label">Total Budget</div>
+      <div class="value" id="cardTotal">–</div>
+      <div class="sub2" id="cardTotalCount">–</div>
+    </div>
+    <div class="card used">
+      <div class="label">Used So Far</div>
+      <div class="value" id="cardUsed">–</div>
+      <div class="progress-track"><div class="progress-fill" id="cardUsedBar" style="width:0%"></div></div>
+    </div>
+    <div class="card remaining">
+      <div class="label">Remaining</div>
+      <div class="value" id="cardRemaining">–</div>
+      <div class="sub2" id="cardRemainingSub">–</div>
+    </div>
+    <div class="card pct">
+      <div class="label">% Paid</div>
+      <div class="value" id="cardPct">–</div>
+      <div class="sub2">of total budget already paid</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h3>Total Budget by Location</h3>
+      <canvas id="chartLocation"></canvas>
+    </div>
+    <div class="panel">
+      <h3>Total Budget by Category</h3>
+      <canvas id="chartCategory"></canvas>
+    </div>
+    <div class="panel">
+      <h3>Paid vs Remaining by Location</h3>
+      <canvas id="chartPaidRemaining"></canvas>
+    </div>
+    <div class="panel">
+      <h3>Cumulative Spend Over Time</h3>
+      <canvas id="chartTimeSeries"></canvas>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h3>Line Items</h3>
+    <div class="filters">
+      <span class="tag" id="rowCount">0 rows</span>
+    </div>
+    <div class="table-wrap">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th data-key="Date">Date</th>
+            <th data-key="Location">Location</th>
+            <th data-key="Category">Category</th>
+            <th data-key="Item">Item</th>
+            <th data-key="Details">Details</th>
+            <th data-key="Total" class="num">Total (AUD)</th>
+            <th data-key="Used" class="num">Used (AUD)</th>
+            <th data-key="Remaining" class="num">Remaining (AUD)</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<footer>Replace <code>data/Holiday.xlsx</code> with an updated file (same name) and reload — or drop a new file above to preview instantly.</footer>
+
+<script>
+const XLSX_PATH = "data/Holiday.xlsx";
+
+// --- Category derivation from messy Item labels ---
+const CATEGORY_MAP = [
+  [/flight/i, "Flights"],
+  [/accom+odation/i, "Accommodation"],
+  [/visa/i, "Visas"],
+  [/gift/i, "Gifts"],
+  [/car hire|fuel|uber|transport/i, "Transport"],
+  [/activit/i, "Activities"],
+  [/meal|lunch|dinner|breakfast|food|grocer|drink/i, "Food & Drink"],
+  [/photoshoot|clothes|graduation|the end/i, "Other"],
+];
+function deriveCategory(item, details){
+  const s = (item || "") + " " + (details || "");
+  for (const [re, cat] of CATEGORY_MAP){
+    if (re.test(s)) return cat;
+  }
+  return item && item.trim() ? item.trim() : "Other";
+}
+
+const fmtAUD = n => new Intl.NumberFormat('en-AU', {style:'currency', currency:'AUD', maximumFractionDigits:0}).format(n || 0);
+const fmtNum = n => new Intl.NumberFormat('en-AU', {maximumFractionDigits:0}).format(n || 0);
+
+let rawRows = [];
+let charts = {};
+
+function excelDateToJs(v){
+  if (v instanceof Date) return v;
+  if (typeof v === "number"){
+    // Excel serial date -> JS date
+    const utc = XLSX.SSF.parse_date_code(v);
+    if (utc) return new Date(Date.UTC(utc.y, utc.m - 1, utc.d));
+  }
+  if (typeof v === "string" && v.trim()){
+    const d = new Date(v);
+    if (!isNaN(d)) return d;
+  }
+  return null;
+}
+
+function parseWorkbook(ab){
+  const wb = XLSX.read(ab, {type:"array", cellDates:true});
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(sheet, {defval:null});
+  const rows = [];
+  for (const r of json){
+    const location = (r.Location || "").toString().trim();
+    const item = (r.Item || "").toString().trim();
+    if (!location && !item) continue;
+    const total = Number(r["Total (AUD)"]) || 0;
+    const used = Number(r["Used So Far (AUD)"]) || 0;
+    let remaining = r["Remaining (AUD)"];
+    remaining = (remaining === null || remaining === undefined || remaining === "") ? (total - used) : Number(remaining);
+    rows.push({
+      Date: excelDateToJs(r.Date),
+      Location: location || "Unspecified",
+      Item: item,
+      Details: (r.Details || "").toString().trim(),
+      Quantity: Number(r.Quantity) || 0,
+      Total: total,
+      Used: used,
+      Remaining: remaining,
+      Category: deriveCategory(item, r.Details),
+    });
+  }
+  return rows;
+}
+
+function loadFromArrayBuffer(ab, label){
+  try{
+    rawRows = parseWorkbook(ab);
+    document.getElementById("status").textContent = `Loaded ${rawRows.length} rows${label ? " · " + label : ""}`;
+    populateFilters();
+    render();
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("app").style.display = "block";
+  }catch(e){
+    document.getElementById("status").textContent = "Error parsing file: " + e.message;
+    console.error(e);
+  }
+}
+
+async function loadFromServer(){
+  document.getElementById("status").textContent = "Loading…";
+  try{
+    const res = await fetch(XLSX_PATH + "?t=" + Date.now(), {cache:"no-store"});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const ab = await res.arrayBuffer();
+    loadFromArrayBuffer(ab, "from data/Holiday.xlsx");
+  }catch(e){
+    document.getElementById("status").textContent = "Could not fetch data/Holiday.xlsx (" + e.message + "). Upload a file instead.";
+    document.getElementById("loading").textContent = "Could not auto-load the spreadsheet. Use the upload control above to load your .xlsx file.";
+  }
+}
+
+function populateFilters(){
+  const locSel = document.getElementById("locationFilter");
+  const catSel = document.getElementById("categoryFilter");
+  const curLoc = locSel.value, curCat = catSel.value;
+  const locs = [...new Set(rawRows.map(r => r.Location))].sort();
+  const cats = [...new Set(rawRows.map(r => r.Category))].sort();
+  locSel.innerHTML = '<option value="">All</option>' + locs.map(l => `<option value="${l}">${l}</option>`).join("");
+  catSel.innerHTML = '<option value="">All</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join("");
+  if (locs.includes(curLoc)) locSel.value = curLoc;
+  if (cats.includes(curCat)) catSel.value = curCat;
+}
+
+function getFiltered(){
+  const loc = document.getElementById("locationFilter").value;
+  const cat = document.getElementById("categoryFilter").value;
+  return rawRows.filter(r => (!loc || r.Location === loc) && (!cat || r.Category === cat));
+}
+
+function sumBy(rows, keyFn, valFn){
+  const m = new Map();
+  for (const r of rows){
+    const k = keyFn(r);
+    m.set(k, (m.get(k) || 0) + valFn(r));
+  }
+  return m;
+}
+
+const PALETTE = ["#5b8cff","#31d0aa","#ffb648","#ff6767","#c78bff","#4fd1e6","#f0a1c2","#a6e15a","#7c93ff","#ffd97d"];
+
+function destroyChart(key){
+  if (charts[key]){ charts[key].destroy(); delete charts[key]; }
+}
+
+function render(){
+  const rows = getFiltered();
+
+  const totalSum = rows.reduce((a,r)=>a+r.Total,0);
+  const usedSum = rows.reduce((a,r)=>a+r.Used,0);
+  const remainingSum = rows.reduce((a,r)=>a+r.Remaining,0);
+  const pctPaid = totalSum > 0 ? (usedSum/totalSum)*100 : 0;
+
+  document.getElementById("cardTotal").textContent = fmtAUD(totalSum);
+  document.getElementById("cardTotalCount").textContent = `${rows.length} line items`;
+  document.getElementById("cardUsed").textContent = fmtAUD(usedSum);
+  document.getElementById("cardUsedBar").style.width = Math.min(pctPaid,100).toFixed(1) + "%";
+  document.getElementById("cardRemaining").textContent = fmtAUD(remainingSum);
+  document.getElementById("cardRemainingSub").textContent = `${(100-pctPaid).toFixed(1)}% still to pay`;
+  document.getElementById("cardPct").textContent = pctPaid.toFixed(1) + "%";
+
+  // Chart: Total by Location
+  const byLoc = sumBy(rows, r=>r.Location, r=>r.Total);
+  const locLabels = [...byLoc.keys()].sort((a,b)=>byLoc.get(b)-byLoc.get(a));
+  destroyChart("loc");
+  charts.loc = new Chart(document.getElementById("chartLocation"), {
+    type:"bar",
+    data:{ labels:locLabels, datasets:[{ label:"Total (AUD)", data:locLabels.map(l=>byLoc.get(l)), backgroundColor:PALETTE[0], borderRadius:6 }]},
+    options: baseOpts({y:{ticks:{callback:v=>fmtNum(v)}}})
+  });
+
+  // Chart: Total by Category
+  const byCat = sumBy(rows, r=>r.Category, r=>r.Total);
+  const catLabels = [...byCat.keys()].sort((a,b)=>byCat.get(b)-byCat.get(a));
+  destroyChart("cat");
+  charts.cat = new Chart(document.getElementById("chartCategory"), {
+    type:"pie",
+    data:{ labels:catLabels, datasets:[{ data:catLabels.map(c=>byCat.get(c)), backgroundColor:catLabels.map((_,i)=>PALETTE[i%PALETTE.length]) }]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:"right", labels:{color:"#eef1f8", boxWidth:12}}} }
+  });
+
+  // Chart: Paid vs Remaining by Location (stacked)
+  const byLocUsed = sumBy(rows, r=>r.Location, r=>r.Used);
+  const byLocRem = sumBy(rows, r=>r.Location, r=>r.Remaining);
+  destroyChart("paidrem");
+  charts.paidrem = new Chart(document.getElementById("chartPaidRemaining"), {
+    type:"bar",
+    data:{
+      labels:locLabels,
+      datasets:[
+        { label:"Used So Far", data:locLabels.map(l=>byLocUsed.get(l)||0), backgroundColor:PALETTE[1], borderRadius:4 },
+        { label:"Remaining", data:locLabels.map(l=>byLocRem.get(l)||0), backgroundColor:PALETTE[2], borderRadius:4 },
+      ]
+    },
+    options: baseOpts({x:{stacked:true}, y:{stacked:true, ticks:{callback:v=>fmtNum(v)}}}, true)
+  });
+
+  // Chart: cumulative spend over time (by Total, sorted by date)
+  const dated = rows.filter(r=>r.Date).sort((a,b)=>a.Date-b.Date);
+  const byDate = sumBy(dated, r=>r.Date.toISOString().slice(0,10), r=>r.Total);
+  const dateLabels = [...byDate.keys()].sort();
+  let running = 0;
+  const cumData = dateLabels.map(d => (running += byDate.get(d)));
+  destroyChart("time");
+  charts.time = new Chart(document.getElementById("chartTimeSeries"), {
+    type:"line",
+    data:{ labels:dateLabels, datasets:[{ label:"Cumulative planned spend (AUD)", data:cumData, borderColor:PALETTE[0], backgroundColor:"rgba(91,140,255,0.15)", fill:true, tension:0.25, pointRadius:2 }]},
+    options: baseOpts({y:{ticks:{callback:v=>fmtNum(v)}}})
+  });
+
+  // Table
+  renderTable(rows);
+}
+
+function baseOpts(scaleOverrides = {}, showLegend=false){
+  return {
+    responsive:true,
+    maintainAspectRatio:false,
+    plugins:{ legend:{ display:showLegend, labels:{color:"#eef1f8"} } },
+    scales:{
+      x:{ ticks:{color:"#9aa5c0"}, grid:{color:"#1f2942"}, ...scaleOverrides.x },
+      y:{ ticks:{color:"#9aa5c0"}, grid:{color:"#1f2942"}, ...scaleOverrides.y },
+    }
+  };
+}
+
+let sortState = {key:"Date", dir:1};
+function renderTable(rows){
+  document.getElementById("rowCount").textContent = `${rows.length} rows`;
+  const sorted = [...rows].sort((a,b)=>{
+    let av = a[sortState.key], bv = b[sortState.key];
+    if (av instanceof Date) av = av.getTime() || 0;
+    if (bv instanceof Date) bv = bv.getTime() || 0;
+    if (typeof av === "string") return av.localeCompare(bv) * sortState.dir;
+    return ((av||0) - (bv||0)) * sortState.dir;
+  });
+  const tbody = document.getElementById("tableBody");
+  tbody.innerHTML = sorted.map(r => `
+    <tr>
+      <td>${r.Date ? r.Date.toLocaleDateString('en-AU') : ""}</td>
+      <td>${r.Location}</td>
+      <td><span class="tag">${r.Category}</span></td>
+      <td>${r.Item}</td>
+      <td>${r.Details}</td>
+      <td class="num">${fmtAUD(r.Total)}</td>
+      <td class="num">${fmtAUD(r.Used)}</td>
+      <td class="num">${fmtAUD(r.Remaining)}</td>
+    </tr>
+  `).join("");
+}
+
+document.querySelectorAll("#dataTable thead th").forEach(th => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.key;
+    sortState.dir = (sortState.key === key) ? -sortState.dir : 1;
+    sortState.key = key;
+    renderTable(getFiltered());
+  });
+});
+
+document.getElementById("locationFilter").addEventListener("change", render);
+document.getElementById("categoryFilter").addEventListener("change", render);
+document.getElementById("reloadBtn").addEventListener("click", loadFromServer);
+
+const fileInput = document.getElementById("fileInput");
+fileInput.addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  f.arrayBuffer().then(ab => loadFromArrayBuffer(ab, "uploaded: " + f.name));
+});
+const dz = document.getElementById("dropzone");
+["dragover","dragenter"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("drag"); }));
+["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("drag"); }));
+dz.addEventListener("drop", e => {
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  f.arrayBuffer().then(ab => loadFromArrayBuffer(ab, "uploaded: " + f.name));
+});
+
+loadFromServer();
+</script>
+</body>
+</html>
