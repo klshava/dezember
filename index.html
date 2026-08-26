@@ -96,6 +96,13 @@
   <select id="locationFilter"><option value="">All</option></select>
   <label for="categoryFilter">Category</label>
   <select id="categoryFilter"><option value="">All</option></select>
+  <label for="statusFilter">Payment status</label>
+  <select id="statusFilter">
+    <option value="">All</option>
+    <option value="unpaid">Unpaid</option>
+    <option value="partial">Partially paid</option>
+    <option value="paid">Fully paid</option>
+  </select>
   <button class="primary" id="reloadBtn">↻ Reload spreadsheet</button>
   <label id="dropzone" for="fileInput">Drop updated .xlsx here or click to upload</label>
   <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none" />
@@ -283,10 +290,21 @@ function populateFilters(){
   if (cats.includes(curCat)) catSel.value = curCat;
 }
 
+function paymentStatus(r){
+  if (r.Used <= 0) return "unpaid";
+  if (r.Remaining <= 0) return "paid";
+  return "partial";
+}
+
 function getFiltered(){
   const loc = document.getElementById("locationFilter").value;
   const cat = document.getElementById("categoryFilter").value;
-  return rawRows.filter(r => (!loc || r.Location === loc) && (!cat || r.Category === cat));
+  const status = document.getElementById("statusFilter").value;
+  return rawRows.filter(r =>
+    (!loc || r.Location === loc) &&
+    (!cat || r.Category === cat) &&
+    (!status || paymentStatus(r) === status)
+  );
 }
 
 function sumBy(rows, keyFn, valFn){
@@ -421,6 +439,7 @@ document.querySelectorAll("#dataTable thead th").forEach(th => {
 
 document.getElementById("locationFilter").addEventListener("change", render);
 document.getElementById("categoryFilter").addEventListener("change", render);
+document.getElementById("statusFilter").addEventListener("change", render);
 document.getElementById("reloadBtn").addEventListener("click", loadFromServer);
 
 const fileInput = document.getElementById("fileInput");
